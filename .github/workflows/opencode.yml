@@ -14,18 +14,32 @@ jobs:
       contains(github.event.comment.body, ' /opencode') ||
       startsWith(github.event.comment.body, '/opencode')
     runs-on: ubuntu-latest
+
+    # Права записи нужны, чтобы агент мог не только отвечать, но и применять изменения:
+    # - contents: write — коммитить и пушить правки (например, по команде /oc fix)
+    # - pull-requests: write — создавать/обновлять PR с фиксом
+    # - issues: write — комментировать/закрывать issue в ходе триажа
+    # - id-token: write — используется action для подтверждения подлинности workflow
+    #
+    # ВАЖНО: issue_comment публикуют и внешние пользователи, поэтому этот workflow
+    # даёт агенту право пушить от имени репозитория. Для учебного проекта это окно,
+    # но в проде стоит ограничить триггер комментариями от участников команды.
     permissions:
       id-token: write
       contents: write
       pull-requests: write
       issues: write
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
+          # persist-credentials: true + настройка git identity ниже нужны, чтобы
+          # агент мог выполнить git commit/push при работе по /oc fix
           persist-credentials: true
 
       - name: Configure git identity
+        # Агент коммитит от имени служебного бота opencode-bot
         run: |
           git config --global user.name "opencode-bot"
           git config --global user.email "opencode-bot@users.noreply.github.com"
