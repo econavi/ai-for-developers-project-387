@@ -1,0 +1,312 @@
+openapi: 3.0.0
+info:
+  title: Calendar Call API
+  description: |-
+    Calendar Call — сервис бронирования звонков
+
+    ## Роли
+    - **Владелец календаря** — единственный предустановленный профиль без аутентификации.
+    Управляет типами событий и просматривает все бронирования.
+    - **Гость** — любой пользователь без регистрации.
+    Просматривает типы событий и создаёт бронирования на свободные слоты.
+
+    ## Правила занятости
+    - На одно и то же время нельзя создать две записи, даже для разных типов событий.
+    - Окно записи по умолчанию — 14 дней с текущей даты.
+  version: 0.0.0
+tags: []
+paths:
+  /api/bookings:
+    get:
+      operationId: Bookings_list
+      description: Получить список всех бронирований (предстоящие встречи). Только для владельца.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Booking'
+    post:
+      operationId: Bookings_create
+      description: Создать новое бронирование на свободный слот. Для гостя.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingCreate'
+  /api/event-types:
+    get:
+      operationId: EventTypes_list
+      description: Получить список всех типов событий. Доступно всем.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EventType'
+    post:
+      operationId: EventTypes_create
+      description: Создать новый тип события. Только для владельца.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventType'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventTypeCreate'
+  /api/event-types/{id}:
+    get:
+      operationId: EventTypes_get
+      description: Получить тип события по ID. Доступно всем.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventType'
+    put:
+      operationId: EventTypes_update
+      description: Обновить тип события. Только для владельца.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventType'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventTypeUpdate'
+    delete:
+      operationId: EventTypes_delete
+      description: Удалить тип события. Только для владельца.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+  /api/event-types/{id}/slots:
+    get:
+      operationId: Slots_listAvailable
+      description: |-
+        Получить свободные слоты для указанного типа события.
+
+        Если параметры `dateFrom` и `dateTo` не указаны, возвращаются слоты
+        на ближайшие 14 дней от текущей даты.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: dateFrom
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: dateTo
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlotsResponse'
+components:
+  schemas:
+    Booking:
+      type: object
+      required:
+        - id
+        - eventTypeId
+        - guestName
+        - guestEmail
+        - startTime
+        - endTime
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: Уникальный идентификатор бронирования.
+        eventTypeId:
+          type: string
+          description: Идентификатор типа события, на который создано бронирование.
+        guestName:
+          type: string
+          description: Имя гостя.
+        guestEmail:
+          type: string
+          description: Email гостя.
+        startTime:
+          type: string
+          format: date-time
+          description: Начало встречи (UTC).
+        endTime:
+          type: string
+          format: date-time
+          description: Конец встречи (UTC).
+        createdAt:
+          type: string
+          format: date-time
+          description: Дата и время создания бронирования.
+      description: Бронирование встречи.
+    BookingCreate:
+      type: object
+      required:
+        - eventTypeId
+        - guestName
+        - guestEmail
+        - startTime
+      properties:
+        eventTypeId:
+          type: string
+          description: Идентификатор типа события.
+        guestName:
+          type: string
+          description: Имя гостя.
+        guestEmail:
+          type: string
+          description: Email гостя.
+        startTime:
+          type: string
+          format: date-time
+          description: Начало встречи (UTC). Слот должен быть свободен.
+      description: Запрос на создание бронирования.
+    EventType:
+      type: object
+      required:
+        - id
+        - title
+        - durationMinutes
+      properties:
+        id:
+          type: string
+          description: Уникальный идентификатор типа события.
+        title:
+          type: string
+          description: Название типа события (например, «Консультация»).
+        description:
+          type: string
+          description: Описание типа события.
+        durationMinutes:
+          type: integer
+          format: int32
+          description: Длительность встречи в минутах.
+      description: Тип события (вид встречи), создаваемый владельцем.
+    EventTypeCreate:
+      type: object
+      required:
+        - title
+        - durationMinutes
+      properties:
+        title:
+          type: string
+          description: Название типа события.
+        description:
+          type: string
+          description: Описание типа события.
+        durationMinutes:
+          type: integer
+          format: int32
+          description: Длительность встречи в минутах.
+      description: Запрос на создание типа события.
+    EventTypeUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Название типа события.
+        description:
+          type: string
+          description: Описание типа события.
+        durationMinutes:
+          type: integer
+          format: int32
+          description: Длительность встречи в минутах.
+      description: Запрос на обновление типа события. Все поля опциональны.
+    Slot:
+      type: object
+      required:
+        - startTime
+        - endTime
+      properties:
+        startTime:
+          type: string
+          format: date-time
+          description: Начало слота (UTC).
+        endTime:
+          type: string
+          format: date-time
+          description: Конец слота (UTC).
+      description: Временной слот, доступный для бронирования.
+    SlotQueryParams:
+      type: object
+      properties:
+        dateFrom:
+          type: string
+          description: Начало окна поиска (включительно, формат YYYY-MM-DD).
+        dateTo:
+          type: string
+          description: Конец окна поиска (включительно, формат YYYY-MM-DD).
+      description: Параметры фильтрации слотов по дате.
+    SlotsResponse:
+      type: object
+      required:
+        - slots
+      properties:
+        slots:
+          type: array
+          items:
+            $ref: '#/components/schemas/Slot'
+          description: Массив доступных временных слотов.
+      description: Список доступных слотов.

@@ -1,0 +1,4 @@
+kind: project
+emit:
+  - "@typespec/openapi3"
+entrypoint: "./spec/main.tsp"

@@ -1,0 +1,32 @@
+{
+  "name": "ai-for-developers-project-386",
+  "version": "1.0.0",
+  "description": "[![Actions Status](https://github.com/econavi/ai-for-developers-project-386/actions/workflows/hexlet-check.yml/badge.svg)](https://github.com/econavi/ai-for-developers-project-386/actions)",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:e2e": "playwright test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/econavi/ai-for-developers-project-386.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/econavi/ai-for-developers-project-386/issues"
+  },
+  "homepage": "https://github.com/econavi/ai-for-developers-project-386#readme",
+  "dependencies": {
+    "@typespec/compiler": "^1.14.0",
+    "@typespec/http": "^1.14.0",
+    "@typespec/openapi3": "^1.14.0",
+    "@typespec/rest": "^0.84.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0",
+    "@types/node": "^26.1.1"
+  }
+}
