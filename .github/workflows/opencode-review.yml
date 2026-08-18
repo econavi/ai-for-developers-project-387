@@ -1,0 +1,41 @@
+name: opencode-review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  opencode-review:
+    # Включаем проверку так, чтобы бот реагировал на код человека.
+    # PR от bot-аккаунтов пропускаем.
+    if: ${{ !endsWith(github.event.pull_request.user.login, '[bot]') && github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write      # Нужен для аутентификации через GitHub Actions
+      contents: read       # Достаточно для чтения кода и diff
+      pull-requests: write  # Нужно, чтобы оставлять ревью-комментарии в PR
+      issues: write         # Нужно, чтобы оставлять комментарии в PR
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: true
+
+      - name: Configure git identity
+        run: |
+          git config --global user.name "opencode-bot"
+          git config --global user.email "opencode-bot@users.noreply.github.com"
+
+      - name: Run opencode
+        uses: anomalyco/opencode/github@latest
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          model: opencode/deepseek-v4-flash-free
+          use_github_token: true
+          prompt: |
+            Проверь этот pull request:
+            - Оцени качество кода
+            - Найди потенциальные баги
+            - Предложи улучшения
