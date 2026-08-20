@@ -43,6 +43,11 @@ export function getAvailableSlots(
   const defaultTo = new Date(now);
   defaultTo.setUTCDate(defaultTo.getUTCDate() + 13); // 14 дней включая сегодня
   const dateTo = parseDateParam(dateToStr, defaultTo);
+  // Нормализуем dateTo к концу дня (23:59:59.999 UTC): параметр в формате
+  // YYYY-MM-DD парсится как полночь 00:00, а счётчик current идёт с 09:00.
+  // Без этой нормализации последний день окна всегда оказывается меньше
+  // первого рабочего слота (09:00 > 00:00), и цикл while его пропускает.
+  dateTo.setUTCHours(23, 59, 59, 999);
 
   const durationMs = eventType.durationMinutes * 60 * 1000;
   const stepMs = SLOT_STEP_MINUTES * 60 * 1000;
