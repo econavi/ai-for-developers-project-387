@@ -170,24 +170,31 @@ jobs:
         # Падение ночного прогона не должно быть невидимым: команда утром смотрит
         # issue, а не Actions. Шаг срабатывает при отказе любого предыдущего шага
         # (серверы, Lighthouse, агент) и оставляет след в скользящем issue.
-        # Если упало самое первое создание issue — уведомлять некуда, молча выходим.
+        # На отмену прогона (concurrency cancel) шаг сознательно не реагирует:
+        # отмена означает «пришёл более свежий запуск», а не поломку.
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          ISSUE=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" \
+          HTTP_CODE=$(curl -sf -o /tmp/issues.json -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/issues?labels=lighthouse&state=open" |
-            jq -r '.[0].number // empty')
+            "https://api.github.com/repos/${{ github.repository }}/issues?labels=lighthouse&state=open") || HTTP_CODE=000
+          # /issues возвращает и PR: фильтруем по отсутствию поля pull_request,
+          # иначе при лейбле на PR уведомление ушло бы туда вместо issue.
+          ISSUE=$(jq -r '[.[] | select(has("pull_request") | not)][0].number // empty' /tmp/issues.json 2>/dev/null)
           if [ -z "$ISSUE" ]; then
-            echo "Issue с лейблом lighthouse не найден — уведомление некуда отправить"
+            # Различаем «issue нет» и «API не ответил»: во втором случае код
+            # остаётся в логе Actions для диагностики молча потерянных уведомлений.
+            echo "Issue не найден или API недоступен (HTTP $HTTP_CODE)"
             exit 0
           fi
           BODY=$(jq -n --arg url "$RUN_URL" \
             '{"body": ("⚠️ Ночной аудит Lighthouse не завершился. Логи прогона: " + $url)}')
           curl -sf -X POST \
             -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Content-Type: application/json" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${{ github.repository }}/issues/$ISSUE/comments" \
             -d "$BODY" > /dev/null
