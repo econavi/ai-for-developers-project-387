@@ -50,7 +50,9 @@ jobs:
 
       - name: Start backend
         working-directory: ./backend
-        run: npm run dev &
+        # npm start = tsx src/index.ts без watch: вотчер нужен только разработчику,
+        # в CI процесс просто обязан держать порт 3001 до конца прогона.
+        run: npm start &
 
       - name: Start frontend preview server
         working-directory: ./frontend
@@ -61,10 +63,14 @@ jobs:
 
       - name: Wait for servers
         run: |
+          # Третий запрос идёт через preview-прокси (/api): только он ловит
+          # отвалившийся прокси явно — иначе проблема всплыла бы косвенно,
+          # низкими баллами SEO/best-practices в отчёте вместо падения шага.
           for i in $(seq 1 60); do
             if curl -s --max-time 2 -o /dev/null http://localhost:3001 \
-              && curl -s --max-time 2 -o /dev/null http://localhost:4173; then
-              echo "Серверы поднялись"
+              && curl -s --max-time 2 -o /dev/null http://localhost:4173 \
+              && curl -s --max-time 2 -o /dev/null http://localhost:4173/api/event-types; then
+              echo "Серверы и прокси поднялись"
               exit 0
             fi
             sleep 2
@@ -75,7 +81,10 @@ jobs:
       - name: Run Lighthouse
         run: |
           mkdir -p reports/lighthouse
-          npx lighthouse http://localhost:4173 \
+          # Мажор CLI закреплён: баллы между ночами должны быть сопоставимы,
+          # а свежий мажорный релиз lighthouse не должен неожиданно сломать
+          # прогон или молча поменять методику оценки.
+          npx -y lighthouse@12 http://localhost:4173 \
             --output=json --output=html \
             --output-path=reports/lighthouse/report \
             --only-categories=performance,accessibility,best-practices,seo \
