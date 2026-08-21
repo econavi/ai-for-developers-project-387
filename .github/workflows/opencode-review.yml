@@ -32,7 +32,7 @@ jobs:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
         with:
-          model: opencode/deepseek-v4-flash-free
+          model: opencode/big-pickle
           use_github_token: true
           prompt: |
             Проверь этот pull request:
