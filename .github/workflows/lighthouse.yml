@@ -13,9 +13,11 @@ on:
   workflow_dispatch:
 
 # Ночной и ручной прогоны одновременно бессмысленны и конфликтуют за порты,
-# поэтому новый запуск отменяет начатый.
+# поэтому новый запуск отменяет начатый. Группа захардкожена, а не завязана
+# на github.ref: иначе ручной запуск из ветки не отменил бы ночной прогон,
+# хотя раннеры у них общие только по смыслу, а конфликт портов общий всегда.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: lighthouse-nightly
   cancel-in-progress: true
 
 permissions:
@@ -64,12 +66,15 @@ jobs:
       - name: Wait for servers
         run: |
           # Третий запрос идёт через preview-прокси (/api): только он ловит
-          # отвалившийся прокси явно — иначе проблема всплыла бы косвенно,
-          # низкими баллами SEO/best-practices в отчёте вместо падения шага.
+          # отвалившийся прокси явно. В отличие от GET / на :3001 (тот отвечает
+          # 404), у /api/event-types проверяем статус 2xx — упавший бэкенд или
+          # битый роут падают здесь, а не нулевыми баллами в отчёте.
+          # Первые два запроса проверяют только связность TCP, без --fail:
+          # строгая проверка статуса сломала бы ожидание на корневых 404.
           for i in $(seq 1 60); do
             if curl -s --max-time 2 -o /dev/null http://localhost:3001 \
               && curl -s --max-time 2 -o /dev/null http://localhost:4173 \
-              && curl -s --max-time 2 -o /dev/null http://localhost:4173/api/event-types; then
+              && curl -s --max-time 2 -o /dev/null -w '%{http_code}' http://localhost:4173/api/event-types | grep -q '^2'; then
               echo "Серверы и прокси поднялись"
               exit 0
             fi
