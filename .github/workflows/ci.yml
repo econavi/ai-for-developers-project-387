@@ -2,6 +2,12 @@ name: CI
 
 on: [push, pull_request]
 
+# Токен нужен только на чтение кода для checkout — тесты никуда не пишут.
+# Явный минимум вместо дефолтных прав репозитория: даже если в тесты попадёт
+# шаг с GITHUB_TOKEN, записать что-либо он не сможет.
+permissions:
+  contents: read
+
 jobs:
   test-e2e:
     runs-on: ubuntu-latest
