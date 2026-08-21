@@ -8,11 +8,23 @@ on:
 
 jobs:
   opencode:
+    # Командный gate: агент реагирует только на /oc и /opencode.
+    #
+    # Защита от самозапуска: комментарии ботов (включая самого агента) игнорируются.
+    # Иначе ответ агента, процитировавший команду пользователя, или комментарий
+    # другого бота с "/oc" запускали бы новый прогон — цикл лишних списаний API.
+    # Тот же паттерн используется в opencode-review.yml; оба триггера этого
+    # workflow (issue_comment и pull_request_review_comment) отдают автора
+    # комментария через comment.user.login, поэтому одного условия достаточно.
     if: |
-      contains(github.event.comment.body, ' /oc') ||
-      startsWith(github.event.comment.body, '/oc') ||
-      contains(github.event.comment.body, ' /opencode') ||
-      startsWith(github.event.comment.body, '/opencode')
+      !endsWith(github.event.comment.user.login, '[bot]') &&
+      !endsWith(github.actor, '[bot]') &&
+      (
+        contains(github.event.comment.body, ' /oc') ||
+        startsWith(github.event.comment.body, '/oc') ||
+        contains(github.event.comment.body, ' /opencode') ||
+        startsWith(github.event.comment.body, '/opencode')
+      )
     runs-on: ubuntu-latest
 
     # Права записи нужны, чтобы агент мог не только отвечать, но и применять изменения:
