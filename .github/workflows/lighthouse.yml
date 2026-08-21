@@ -1,0 +1,137 @@
+name: lighthouse
+
+# Ночной аудит качества фронтенда через Lighthouse CLI с отчётом для команды.
+#
+# Ограничения GitHub: расписание срабатывает только для версии workflow на
+# дефолтной ветке (main), поэтому правки этого файла «включаются» после мерджа.
+# GitHub также автоматически отключает расписание после 60 дней неактивности
+# в репозитории — при возобновлении работы достаточно перезапустить вручную.
+on:
+  schedule:
+    # cron всегда интерпретируется в UTC: 23:00 UTC = 02:00 МСК следующего дня.
+    - cron: "0 23 * * *"
+  workflow_dispatch:
+
+# Ночной и ручной прогоны одновременно бессмысленны и конфликтуют за порты,
+# поэтому новый запуск отменяет начатый. Группа захардкожена, а не завязана
+# на github.ref: иначе ручной запуск из ветки не отменил бы ночной прогон,
+# хотя раннеры у них общие только по смыслу, а конфликт портов общий всегда.
+concurrency:
+  group: lighthouse-nightly
+  cancel-in-progress: true
+
+permissions:
+  contents: read      # чтение кода; пушить агенту ничего не нужно
+  issues: write       # агент создаёт/обновляет скользящий issue с отчётом
+  id-token: write     # требуется экшену opencode для подтверждения подлинности
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci --legacy-peer-deps
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: npm run build
+
+      - name: Start backend
+        working-directory: ./backend
+        # npm start = tsx src/index.ts без watch: вотчер нужен только разработчику,
+        # в CI процесс просто обязан держать порт 3001 до конца прогона.
+        run: npm start &
+
+      - name: Start frontend preview server
+        working-directory: ./frontend
+        # Аудит делаем по прод-сборке (vite preview), а не по дев-серверу:
+        # неминифицированный код дев-сервера занижает performance-баллы.
+        # preview наследует proxy из server.proxy, поэтому /api уходит в бэкенд.
+        run: npx vite preview --port 4173 --strictPort &
+
+      - name: Wait for servers
+        run: |
+          # Третий запрос идёт через preview-прокси (/api): только он ловит
+          # отвалившийся прокси явно. В отличие от GET / на :3001 (тот отвечает
+          # 404), у /api/event-types проверяем статус 2xx — упавший бэкенд или
+          # битый роут падают здесь, а не нулевыми баллами в отчёте.
+          # Первые два запроса проверяют только связность TCP, без --fail:
+          # строгая проверка статуса сломала бы ожидание на корневых 404.
+          for i in $(seq 1 60); do
+            if curl -s --max-time 2 -o /dev/null http://localhost:3001 \
+              && curl -s --max-time 2 -o /dev/null http://localhost:4173 \
+              && curl -s --max-time 2 -o /dev/null -w '%{http_code}' http://localhost:4173/api/event-types | grep -q '^2'; then
+              echo "Серверы и прокси поднялись"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Серверы не поднялись за 2 минуты" >&2
+          exit 1
+
+      - name: Run Lighthouse
+        run: |
+          mkdir -p reports/lighthouse
+          # Мажор CLI закреплён: баллы между ночами должны быть сопоставимы,
+          # а свежий мажорный релиз lighthouse не должен неожиданно сломать
+          # прогон или молча поменять методику оценки.
+          npx -y lighthouse@12 http://localhost:4173 \
+            --output=json --output=html \
+            --output-path=reports/lighthouse/report \
+            --only-categories=performance,accessibility,best-practices,seo \
+            --chrome-flags="--headless=new"
+          # При нескольких форматах Lighthouse добавляет к пути суффикс ".report":
+          # получаются report.report.json / report.report.html. Переименовываем в
+          # предсказуемые имена, чтобы шаги ниже не зависели от этой особенности CLI.
+          mv reports/lighthouse/report.report.json reports/lighthouse/report.json
+          mv reports/lighthouse/report.report.html reports/lighthouse/report.html
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-report-${{ github.run_id }}
+          path: reports/lighthouse/
+          retention-days: 90
+
+      - name: Run opencode
+        uses: anomalyco/opencode/github@latest
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          model: opencode/big-pickle
+          use_github_token: true
+          prompt: |
+            Прочитай JSON-файл отчёта Lighthouse в каталоге reports/lighthouse/
+            (это ночной аудит фронтенда сервиса бронирования звонков).
+
+            Задача — поддерживать РОВНО ОДИН открытый issue с лейблом "lighthouse":
+
+            1. Найди среди открытых issues репозитория issue с лейблом "lighthouse".
+               Если лейбла ещё нет — создай его.
+            2. Если такой issue есть — добавь туда комментарий с итогами сегодняшнего
+               прогона и обнови чек-лист правок в теле issue. Новый issue не создавай.
+            3. Если его нет — создай issue с заголовком
+               "Lighthouse: аудит качества фронтенда" и лейблом "lighthouse".
+
+            Содержание отчёта:
+            - оценки по категориям: performance, accessibility, best-practices, seo;
+            - топ проблемных аудитов по приоритету (сначала те, что сильнее всего
+              влияют на баллы);
+            - конкретные рекомендуемые правки в коде проекта.
+
+            Пиши по-русски. Не пушь коммиты и не меняй код — работай только с issue.
