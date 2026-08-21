@@ -107,6 +107,15 @@ jobs:
           path: reports/lighthouse/
           retention-days: 90
 
+      - name: Configure git identity
+        # Промпт запрещает агенту пушить коммиты, но он всё равно может выполнять
+        # локальные git-операции (например, commit при исследовании репозитория).
+        # Без identity git падает с "Author identity unknown", а шаг агента —
+        # с exit 1, хотя отчёт к этому моменту уже опубликован в issue.
+        run: |
+          git config --global user.name "opencode-bot"
+          git config --global user.email "opencode-bot@users.noreply.github.com"
+
       - name: Run opencode
         uses: anomalyco/opencode/github@latest
         env:
