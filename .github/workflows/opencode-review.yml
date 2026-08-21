@@ -7,7 +7,7 @@ on:
 jobs:
   opencode-review:
     # Включаем проверку так, чтобы бот реагировал на код человека.
-    # PR от bot-аккаунтов пропускаем.
+    # PR от bot-аккаунтов пропускаем по account type (надёжнее суффикса [bot]).
     #
     # Дополнительно отсекаем события, триггером которых стал сам агент: по команде /oc
     # он пушит коммиты в ветку PR от имени github-actions[bot], что создаёт событие
@@ -15,7 +15,9 @@ jobs:
     # pull_request-событий требует права записи у актора события, а у бота их нет
     # (permission: none) — без этой проверки каждый пуш агента либо падает с ошибкой
     # "does not have write permissions", либо зависает в статусе action_required.
-    if: ${{ !endsWith(github.event.pull_request.user.login, '[bot]') && !endsWith(github.actor, '[bot]') && github.event.pull_request.draft == false }}
+    # Для актора проверка остаётся по суффиксу: поля .type у github.actor
+    # в выражениях Actions нет — это ограничение платформы, не недосмотр.
+    if: ${{ github.event.pull_request.user.type != 'Bot' && !endsWith(github.actor, '[bot]') && github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write      # Нужен для аутентификации через GitHub Actions

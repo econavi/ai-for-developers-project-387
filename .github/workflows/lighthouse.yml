@@ -8,8 +8,10 @@ name: lighthouse
 # в репозитории — при возобновлении работы достаточно перезапустить вручную.
 on:
   schedule:
-    # cron всегда интерпретируется в UTC: 23:00 UTC = 02:00 МСК следующего дня.
-    - cron: "0 23 * * *"
+    # cron всегда интерпретируется в UTC: 23:23 UTC = 02:23 МСК следующего дня.
+    # Минута 23 выбрана специально: прогоны «на ровном часе» GitHub троттлит,
+    # задержки достигают получаса — смещение даёт предсказуемое время старта.
+    - cron: "23 23 * * *"
   workflow_dispatch:
 
 # Ночной и ручной прогоны одновременно бессмысленны и конфликтуют за порты,
@@ -92,26 +94,30 @@ jobs:
 
       - name: Run Lighthouse
         run: |
-          mkdir -p reports/lighthouse
+          # Отчёт пишем в runner.temp, а не в рабочее дерево: дерево остаётся
+          # чистым, и у агента физически не появляются незакоммиченные файлы,
+          # которые провоцировали его на коммит (инцидент 2026-08-21).
+          REPORT_DIR="${{ runner.temp }}/lighthouse"
+          mkdir -p "$REPORT_DIR"
           # Мажор CLI закреплён: баллы между ночами должны быть сопоставимы,
           # а свежий мажорный релиз lighthouse не должен неожиданно сломать
           # прогон или молча поменять методику оценки.
           npx -y lighthouse@12 http://localhost:4173 \
             --output=json --output=html \
-            --output-path=reports/lighthouse/report \
+            --output-path="$REPORT_DIR/report" \
             --only-categories=performance,accessibility,best-practices,seo \
             --chrome-flags="--headless=new"
           # При нескольких форматах Lighthouse добавляет к пути суффикс ".report":
           # получаются report.report.json / report.report.html. Переименовываем в
           # предсказуемые имена, чтобы шаги ниже не зависели от этой особенности CLI.
-          mv reports/lighthouse/report.report.json reports/lighthouse/report.json
-          mv reports/lighthouse/report.report.html reports/lighthouse/report.html
+          mv "$REPORT_DIR/report.report.json" "$REPORT_DIR/report.json"
+          mv "$REPORT_DIR/report.report.html" "$REPORT_DIR/report.html"
 
       - name: Upload report artifact
         uses: actions/upload-artifact@v4
         with:
           name: lighthouse-report-${{ github.run_id }}
-          path: reports/lighthouse/
+          path: ${{ runner.temp }}/lighthouse/
           retention-days: 90
 
       - name: Configure git identity
@@ -132,8 +138,9 @@ jobs:
           model: opencode/big-pickle
           use_github_token: true
           prompt: |
-            Прочитай JSON-файл отчёта Lighthouse в каталоге reports/lighthouse/
-            (это ночной аудит фронтенда сервиса бронирования звонков).
+            Прочитай JSON-файл отчёта Lighthouse в каталоге $RUNNER_TEMP/lighthouse/
+            (env RUNNER_TEMP доступен в шелле; каталог лежит вне рабочего дерева
+            репозитория). Это ночной аудит фронтенда сервиса бронирования звонков.
 
             Задача — поддерживать РОВНО ОДИН открытый issue с лейблом "lighthouse":
 
@@ -156,7 +163,38 @@ jobs:
             у токена нет прав на запись в репозиторий, и любая попытка пуша
             роняет весь прогон. Ошибка аутентификации git — ожидаемое следствие
             этой защиты: не пытайся её «починить», в том числе через GITHUB_TOKEN
-            или настройку credential helper.
-            Каталог reports/ — расходный материал прогона,
-            он в .gitignore; не пытайся его закоммитить, очистить или сохранить.
-            Локальные изменения файлов после чтения отчёта можно не трогать.
+            или настройку credential helper. Код репозитория только читается —
+            изменять файлы рабочего дерева не нужно ни для каких целей.
+
+      - name: Notify about failure
+        # Падение ночного прогона не должно быть невидимым: команда утром смотрит
+        # issue, а не Actions. Шаг срабатывает при отказе любого предыдущего шага
+        # (серверы, Lighthouse, агент) и оставляет след в скользящем issue.
+        # На отмену прогона (concurrency cancel) шаг сознательно не реагирует:
+        # отмена означает «пришёл более свежий запуск», а не поломку.
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          HTTP_CODE=$(curl -sf -o /tmp/issues.json -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues?labels=lighthouse&state=open") || HTTP_CODE=000
+          # /issues возвращает и PR: фильтруем по отсутствию поля pull_request,
+          # иначе при лейбле на PR уведомление ушло бы туда вместо issue.
+          ISSUE=$(jq -r '[.[] | select(has("pull_request") | not)][0].number // empty' /tmp/issues.json 2>/dev/null)
+          if [ -z "$ISSUE" ]; then
+            # Различаем «issue нет» и «API не ответил»: во втором случае код
+            # остаётся в логе Actions для диагностики молча потерянных уведомлений.
+            echo "Issue не найден или API недоступен (HTTP $HTTP_CODE)"
+            exit 0
+          fi
+          BODY=$(jq -n --arg url "$RUN_URL" \
+            '{"body": ("⚠️ Ночной аудит Lighthouse не завершился. Логи прогона: " + $url)}')
+          curl -sf -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/$ISSUE/comments" \
+            -d "$BODY" > /dev/null
